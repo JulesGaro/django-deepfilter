@@ -36,7 +36,24 @@ filter_plan = [
 ]  # --> (f1 && f2) && ( (f3 && f4) || e1)
 
 
-compute_filters(filters=filters)
+def swap_filter_plan(filter_plan, is_tuple=False):
+    swapped_filter_plan = []
+    for element in filter_plan:
+        if isinstance(element, list):
+            swapped_filter_plan.append(swap_filter_plan(filter_plan=element))
+        elif isinstance(element, tuple):
+            swapped_filter_plan.append(
+                swap_filter_plan(filter_plan=element, is_tuple=True)
+            )
+        else:
+            swapped_filter_plan.append(element + 1)
 
-# magic !
-print(f"final : {compute_filter_plan(filter_plan=filter_plan, queryset=queryset)}")
+    if is_tuple:
+
+        return tuple(swapped_filter_plan)
+    else:
+        return swapped_filter_plan
+
+
+print([1, (2, 3, [4, 5]), [6, 7]])
+print(swap_filter_plan(filter_plan=[1, (2, 3, [4, 5]), [6, 7]]))
