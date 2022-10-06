@@ -3,6 +3,7 @@ from sqlite3 import IntegrityError
 
 from django.db import models
 from django.db.models import query
+from .process import parser
 
 QS = [
     444515444,
@@ -33,6 +34,46 @@ class Object(models.Model):
                 pass
 
 
+class Variant(models.Model):
+
+    chr = models.TextField(max_length=3000, default="")
+    start = models.BigIntegerField()
+    ref = models.TextField(max_length=3000, default="")
+    alt = models.TextField(max_length=3000, default="")
+    func_refgene = models.TextField(max_length=50, default="")
+    filters = models.TextField(max_length=3000, default="")
+    omim = models.TextField(max_length=3000, default="")
+    inheritance = models.TextField(max_length=3000, default="")
+    gnomad_genome_all = models.TextField(max_length=3000, default="")
+
+    def __str__(self):
+        return self.chr + ":" + str(self.start) + " " + self.ref + ">" + self.alt
+
+
+class VariantFactory(models.Model):
+    name = models.CharField(default="Nope", max_length=50)
+    filename = models.CharField(default="", max_length=300)
+
+    def load(self):
+        reader = parser(self.filename)
+        for variant in reader:
+            Variant.objects.get_or_create(
+                chr=variant.CHR,
+                start=int(variant.START),
+                ref=variant.REF,
+                alt=variant.ALT,
+                func_refgene=variant.FUNC_REFGENE,
+                filters=variant.FILTERS,
+                omim=variant.OMIM,
+                inheritance=variant.INHERITANCE,
+                gnomad_genome_all=[
+                    existing_value
+                    for existing_value in [variant.GNOMAD_GENOME_ALL]
+                    if existing_value is not None
+                ],
+            )
+
+
 class SimpleFilter:
     def __init__(
         self,
@@ -46,7 +87,7 @@ class SimpleFilter:
         self.value = value
         self.model = model
         self.lookup = "__".join([field, django_filter])
-        self.__queryset = None
+        self.__queryset = model.objects.all()
 
     @property
     def queryset(self):
@@ -57,6 +98,8 @@ class SimpleFilter:
         self.__queryset = v
 
     def compute(self):
+        print(self.model)
+        print(len(self.model.objects.filter(**{self.lookup: self.value})))
         self.__queryset = self.model.objects.filter(**{self.lookup: self.value})
 
 
@@ -67,13 +110,16 @@ class DeepFilter:
         filter_plan: list = [],
     ):
         self.model = model
-        self.filter_plan = []
+        self.filter_plan = filter_plan
         self.init = False
+
+    def filtering(self):
+        pass
 
     def compute_simple_filters(self, filter_plan=None):
         for filter in filter_plan:
             if isinstance(filter, list) or isinstance(filter, tuple):
-                self.compute_all_filters(filter_plan=filter)
+                self.compute_simple_filters(filter_plan=filter)
             else:
                 filter.compute()
 

@@ -15,7 +15,7 @@ migrate: ## Synchronizes the database state with the current set of models and m
 
 .PHONY: createsuperuser
 createsuperuser: ## Creates a default superuser.
-	python manage.py createsuperuser --no-input; exit 0
+	python manage.py createsuperuser
 
 .PHONY: runserver
 runserver: ## Starts the Django development server.
