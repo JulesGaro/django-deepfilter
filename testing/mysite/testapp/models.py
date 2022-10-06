@@ -74,83 +74,91 @@ class VariantFactory(models.Model):
             )
 
 
-class SimpleFilter:
+class DeepFilter:
     def __init__(
         self,
-        name: str = "",
-        model: models.Model = None,
-        field: str = "",
-        value=None,
-        django_filter: str = "",
+        model,
+        raw_filter_plan: dict,
     ):
-        self.name = name
-        self.value = value
         self.model = model
-        self.lookup = "__".join([field, django_filter])
-        self.__queryset = model.objects.all()
+        self.filters = raw_filter_plan["filters"]
 
-    @property
-    def queryset(self):
-        return self.__queryset
+        ordered_filter_plan = self.reorder_filter_plan(raw_filter_plan["dfilter_plan"])
 
-    @queryset.setter
-    def queryset(self, v):
-        self.__queryset = v
+        self.filter_plan = [self.build_filter_plan(filter_plan=ordered_filter_plan)]
 
-    def compute(self):
-        print(self.model)
-        print(len(self.model.objects.filter(**{self.lookup: self.value})))
-        self.__queryset = self.model.objects.filter(**{self.lookup: self.value})
+    def build_filter_plan(self, filter_plan, is_tuple=False):
+        builded_fp = []
+        for element in filter_plan:
+            if isinstance(element, list):
+                builded_fp.append(self.build_filter_plan(filter_plan=element))
+            elif isinstance(element, tuple):
+                builded_fp.append(
+                    self.build_filter_plan(filter_plan=element, is_tuple=True)
+                )
+            else:
+                builded_fp.append(self.compute_simple_filter(name=element))
+
+        if is_tuple:
+
+            return tuple(builded_fp)
+        else:
+            return builded_fp
+
+    def compute_simple_filter(self, filter_name: str):
+        filter = [filter for filter in self.filters if filter["name"] == filter_name][0]
+        lookup = "__".join([filter["field"], filter["django_filter"]])
+
+        return self.model.objects.filter(**{lookup: filter["value"]})
+
+    def reorder_filter_plan(self, filter_plan):
+        """Reorder the filter plan to make sure isolated querysets are at the end of the
+        list/tuple and list/tuple at the begining"""
+
+        reordered_filter_plan = []
+        tuples, lists, filter = [], [], []
+
+        for element in filter_plan:
+            if isinstance(element, tuple):
+                tuples.append(element)
+            elif isinstance(element, list):
+                lists.append(element)
+            else:
+                filter.append(element)
+
+        for object_type in [tuples, lists, filter]:
+
+            reordered_filter_plan.extend(object_type)
+
+        return reordered_filter_plan
+
+    def process(self):
+        processor = DeepFilterProcessor(model=self.model, filter_plan=self.filter_plan)
+
+        filtered_qs = processor.filter()
+
+        return filtered_qs
 
 
 class DeepFilterProcessor:
     def __init__(
         self,
-        model: models.Model,
-        filter_plan: list = [],
+        model,
+        filter_plan,
     ):
         self.model = model
         self.filter_plan = filter_plan
-        self.init = False
 
-    def filtering(self):
-        pass
+    def filter(self):
+        return self.compute_filter_plan(filter_plan=self.filter_plan)
 
-    def compute_simple_filters(self, filter_plan=None):
-        for filter in filter_plan:
-            if isinstance(filter, list) or isinstance(filter, tuple):
-                self.compute_simple_filters(filter_plan=filter)
-            else:
-                filter.compute()
+    def compute_filter_plan(self, filter_plan=[], logic=None):
 
-    def swap_filter_plan(self, filter_plan, is_tuple=False):
-        swapped_filter_plan = []
-        for element in filter_plan:
-            if isinstance(element, list):
-                swapped_filter_plan.append(self.swap_filter_plan(filter_plan=element))
-            elif isinstance(element, tuple):
-                swapped_filter_plan.append(
-                    self.swap_filter_plan(filter_plan=element, is_tuple=True)
-                )
-            else:
-                swapped_filter_plan.append(element.queryset)
-
-        if is_tuple:
-
-            return tuple(swapped_filter_plan)
-        else:
-            return swapped_filter_plan
-
-    def compute_filter_plan(self, filter_plan=[], queryset: list = [], logic=None):
-
-        # Reorder the filterplan to make sure isolated queryset are at the end.
-
-        filter_plan = self.reorder_filter_plan(filter_plan)
         for i, stage in enumerate(filter_plan):
             if isinstance(stage, tuple):  # compute an OR group
-                filter_plan[i] = self.compute_filter_plan(stage, queryset, logic="OR")
+                filter_plan[i] = self.compute_filter_plan(stage, logic="OR")
             elif isinstance(stage, list):  # compute an AND group
-                filter_plan[i] = self.compute_filter_plan(stage, queryset, logic="AND")
+                filter_plan[i] = self.compute_filter_plan(stage, logic="AND")
             else:
                 return self.apply_logic(filter_plan, logic=logic)
 
@@ -173,27 +181,6 @@ class DeepFilterProcessor:
 
         else:
             return filter_plan[0]
-
-    def reorder_filter_plan(self, filter_plan: list) -> list:
-        """Reorder the filter plan to make sure isolated querysets are at the end of the
-        list/tuple and list/tuple at the begining"""
-
-        reordered_filter_plan = []
-        tuples, lists, querysets = [], [], []
-
-        for element in filter_plan:
-            if isinstance(element, tuple):
-                tuples.append(element)
-            elif isinstance(element, list):
-                lists.append(element)
-            else:
-                querysets.append(element)
-
-        for object_type in [tuples, lists, querysets]:
-
-            reordered_filter_plan.extend(object_type)
-
-        return reordered_filter_plan
 
     def compute_OR(self, or_join_list):
         """compute a depth 1 tuple with an OR logic and return a Queryset"""
@@ -224,4 +211,45 @@ class DeepFilterProcessor:
         return self.model.objects.filter(pk__in=qs)
 
 
+{
+    "filters": [
+        {
+            "name": "on_chr1",
+            "model_name": "Variant",
+            "field": "chr",
+            "django_filter": "iexact",
+            "value": "Chr1",
+        },
+        {
+            "name": "ref_is_G",
+            "model_name": "Variant",
+            "field": "ref",
+            "django_filter": "iexact",
+            "value": "G",
+        },
+        {
+            "name": "alt_is_T",
+            "model_name": "Variant",
+            "field": "alt",
+            "django_filter": "iexact",
+            "value": "T",
+        },
+        {
+            "name": "on_chr2",
+            "model_name": "Variant",
+            "field": "chr",
+            "django_filter": "iexact",
+            "value": "Chr2",
+        },
+        {
+            "name": "alt_is_A",
+            "model_name": "Variant",
+            "field": "alt",
+            "django_filter": "iexact",
+            "value": "A",
+        },
+    ],
+    "str_plan": "(on_chr1 && (ref_is_G || alt_is_T)) || (on_chr2 && alt_is_A)",
+    "dfilter_plan": (["on_chr1", ("ref_is_G", "alt_is_T")], ["on_chr2", "alt_is_A"]),
+}
 # qs = NodeVariantAnnotation.objects.filter(**variant_filters)
