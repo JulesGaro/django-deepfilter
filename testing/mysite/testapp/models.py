@@ -103,7 +103,7 @@ class SimpleFilter:
         self.__queryset = self.model.objects.filter(**{self.lookup: self.value})
 
 
-class DeepFilter:
+class DeepFilterProcessor:
     def __init__(
         self,
         model: models.Model,
